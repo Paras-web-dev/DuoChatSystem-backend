@@ -48,8 +48,19 @@ const requireAdmin = (req, res, next) => {
 
 const authenticateSocket = async (socket, next) => {
   try {
-    const token = socket.handshake.auth?.token;
-    if (!token) return next(new Error("No token"));
+    const token =
+      socket.handshake.auth?.token ||
+      socket.handshake.query?.token ||
+      socket.handshake.headers?.authorization?.split(" ")[1];
+
+    if (!token) {
+      console.warn("Socket auth failed: missing token", {
+        auth: socket.handshake.auth,
+        query: socket.handshake.query,
+        authorization: socket.handshake.headers?.authorization,
+      });
+      return next(new Error("No token"));
+    }
 
     const decoded = normalizeDecoded(jwt.verify(token, process.env.JWT_SECRET));
     if (!decoded.id) return next(new Error("Invalid token payload"));
@@ -66,6 +77,7 @@ const authenticateSocket = async (socket, next) => {
     };
     next();
   } catch (err) {
+    console.error("Socket auth error:", err.message);
     next(new Error("Authentication error"));
   }
 };

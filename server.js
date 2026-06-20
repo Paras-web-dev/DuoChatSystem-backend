@@ -16,7 +16,7 @@ const User = require("./models/User");
 
 const app = express();
 const server = http.createServer(app);
-const clientUrl =  "https://networkerror.xyz";
+const clientUrl = process.env.CLIENT_URL || "https://networkerror.xyz";
 const PORT = process.env.PORT || 5000;
 
 const io = new Server(server, {
@@ -41,6 +41,10 @@ app.get("/api/health", (req, res) => res.json({ status: "ok", time: new Date() }
 const onlineUsers = new Map();
 
 io.use(authenticateSocket);
+
+io.on("connect_error", (err) => {
+  console.error("Socket connect_error:", err.message);
+});
 
 io.on("connection", async (socket) => {
   const { userId, username, role } = socket.user;
