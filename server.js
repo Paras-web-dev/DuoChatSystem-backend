@@ -16,7 +16,7 @@ const User = require("./models/User");
 
 const app = express();
 const server = http.createServer(app);
-const clientUrl = process.env.CLIENT_URL || "https://networkerror.xyz";
+const clientUrl = "https://networkerror.xyz";
 const PORT = process.env.PORT || 5000;
 
 const io = new Server(server, {
