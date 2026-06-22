@@ -16,7 +16,9 @@ const User = require("./models/User");
 
 const app = express();
 const server = http.createServer(app);
-const clientUrl = "https://networkerror.xyz";
+
+// ✅ FIX: use CLIENT_URL from .env instead of hardcoded value
+const clientUrl = process.env.CLIENT_URL || "https://networkerror.xyz";
 const PORT = process.env.PORT || 5000;
 
 const io = new Server(server, {
@@ -36,9 +38,25 @@ app.use("/api/auth", authRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/upload", uploadRoutes);
 
-app.get("/api/health", (req, res) => res.json({ status: "ok", time: new Date() }));
+// ✅ FIX: health check now shows real MongoDB connection status
+app.get("/api/health", (req, res) => {
+  const dbState = mongoose.connection.readyState;
+  // 0 = disconnected, 1 = connected, 2 = connecting, 3 = disconnecting
+  const dbStatus = ["disconnected", "connected", "connecting", "disconnecting"][dbState] || "unknown";
+  res.json({
+    status: dbState === 1 ? "ok" : "degraded",
+    db: dbStatus,
+    onlineUsers: onlineUsers.size,
+    time: new Date(),
+  });
+});
 
 const onlineUsers = new Map();
+
+// ✅ NEW: rate limiter for socket messages
+// tracks last message time per userId — max 1 message per 500ms
+const messageCooldowns = new Map();
+const MESSAGE_COOLDOWN_MS = 500;
 
 io.use(authenticateSocket);
 
@@ -73,6 +91,14 @@ io.on("connection", async (socket) => {
 
   socket.on("send_message", async (data) => {
     try {
+      // ✅ NEW: rate limiting — ignore if sending too fast
+      const now = Date.now();
+      const lastSent = messageCooldowns.get(userId) || 0;
+      if (now - lastSent < MESSAGE_COOLDOWN_MS) {
+        return socket.emit("error", { message: "You are sending messages too fast. Please slow down." });
+      }
+      messageCooldowns.set(userId, now);
+
       const { content, type = "text", imageUrl = null } = data || {};
       if (!content && !imageUrl) {
         return socket.emit("error", { message: "Message content is required" });
@@ -130,6 +156,9 @@ io.on("connection", async (socket) => {
   socket.on("disconnect", async (reason) => {
     console.log(`${username} disconnected (${reason})`);
     onlineUsers.delete(socket.id);
+
+    // ✅ NEW: clean up rate limiter entry on disconnect
+    messageCooldowns.delete(userId);
 
     const stillOnline = [...onlineUsers.values()].some((user) => user.userId === userId);
     if (stillOnline) return;

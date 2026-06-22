@@ -62,7 +62,13 @@ const register = async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 12);
-    const user = await User.create({ username, email, password: hashedPassword, role });
+
+    const user = await User.create({
+      username,
+      email,
+      password: hashedPassword,
+      role,
+    });
 
     return res.status(201).json({ user: userResponse(user) });
   } catch (err) {
@@ -96,23 +102,10 @@ const login = async (req, res) => {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
-    // ✅ FIX: check if lastSeen is recent before blocking login
-    // If isOnline=true but lastSeen was more than 2 minutes ago,
-    // the server probably crashed and never cleaned up — auto-heal it
     if (user.isOnline) {
-      const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
-      const isStale = !user.lastSeen || user.lastSeen < twoMinutesAgo;
-
-      if (isStale) {
-        // Auto-heal: server crashed and left isOnline=true — reset and allow login
-        console.warn(`Auto-healing stale isOnline for ${user.username}`);
-        await User.findByIdAndUpdate(user._id, { isOnline: false, lastSeen: new Date() });
-      } else {
-        // Genuinely logged in on another device
-        return res.status(409).json({
-          message: `${user.role === "admin" ? "Admin" : "User"} "${user.username}" is already logged in on another device. Please logout there first.`,
-        });
-      }
+      return res.status(409).json({
+        message: `${user.role === "admin" ? "Admin" : "User"} "${user.username}" is already logged in on another device. Please logout there first.`,
+      });
     }
 
     return res.json({ token: signToken(user), user: userResponse(user) });
@@ -167,62 +160,4 @@ const forceLogout = async (req, res) => {
   }
 };
 
-// ✅ NEW: logout endpoint — called by frontend on logout
-// Sets isOnline=false immediately via HTTP (socket disconnect does this too,
-// but this is a safety net in case socket never fully connected)
-const logout = async (req, res) => {
-  try {
-    await User.findByIdAndUpdate(req.user.id, {
-      isOnline: false,
-      lastSeen: new Date(),
-    });
-    console.log(`${req.user.username} logged out via HTTP`);
-    return res.json({ message: "Logged out successfully" });
-  } catch (err) {
-    console.error("Logout error:", err);
-    return res.status(500).json({ message: "Server error" });
-  }
-};
-
-// ✅ NEW: self-service unlock — user locked out due to stale isOnline
-// Does NOT require admin. Verifies identity with password before unlocking.
-const selfUnlock = async (req, res) => {
-  try {
-    const identifier = normalizeUsername(req.body.identifier || req.body.email || req.body.username);
-    const password = String(req.body.password || "");
-
-    if (!identifier || !password) {
-      return res.status(400).json({ message: "Identifier and password are required" });
-    }
-
-    const user = await User.findOne({
-      $or: [
-        { email: normalizeEmail(identifier) },
-        { username: new RegExp(`^${escapeRegex(identifier)}$`, "i") },
-      ],
-    });
-
-    if (!user) {
-      return res.status(401).json({ message: "Invalid credentials" });
-    }
-
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return res.status(401).json({ message: "Invalid credentials" });
-    }
-
-    // Identity verified — reset online status
-    await User.findByIdAndUpdate(user._id, {
-      isOnline: false,
-      lastSeen: new Date(),
-    });
-
-    console.log(`${user.username} self-unlocked their account`);
-    return res.json({ message: "Account unlocked. You can now log in." });
-  } catch (err) {
-    console.error("Self-unlock error:", err);
-    return res.status(500).json({ message: "Server error" });
-  }
-};
-
-module.exports = { register, login, me, users, forceLogout, logout, selfUnlock };
+module.exports = { register, login, me, users, forceLogout };
