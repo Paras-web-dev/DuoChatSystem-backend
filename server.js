@@ -11,8 +11,7 @@ const messageRoutes = require("./routes/messages");
 const uploadRoutes = require("./routes/upload");
 const { authenticateSocket } = require("./middleware/auth");
 const { sendOnlineNotification } = require("./utils/mailer");
-// ✅ NEW: Telegram + Ntfy notifiers
-const { sendUserOnlineNotification, sendNewMessageNotification } = require("./utils/ntfyNotifier");
+// ✅ NEW: Telegram notifier
 const { sendUserOnlineTelegram, sendNewMessageTelegram } = require("./utils/telegramNotifier");
 const Message = require("./models/Message");
 const User = require("./models/User");
@@ -94,9 +93,8 @@ io.on("connection", async (socket) => {
 
   if (role !== "admin" && wasOffline) {
     sendOnlineNotification(username).catch(console.error);
-    // ✅ NEW: send Ntfy + Telegram if admin is offline
+    // ✅ NEW: Telegram notification if admin is offline
     if (!isAdminOnline()) {
-      sendUserOnlineNotification(username).catch(console.error);
       sendUserOnlineTelegram(username).catch(console.error);
     }
   }
@@ -142,9 +140,8 @@ io.on("connection", async (socket) => {
         hiddenFromUser: populated.hiddenFromUser,
       });
 
-      // ✅ NEW: send Ntfy + Telegram if user sends message and admin is offline
+      // ✅ NEW: Telegram notification if user sends message and admin is offline
       if (role !== "admin" && !isAdminOnline()) {
-        sendNewMessageNotification(username, content, type).catch(console.error);
         sendNewMessageTelegram(username, content, type).catch(console.error);
       }
 
@@ -208,7 +205,6 @@ const start = async () => {
       console.log(`PrivChat server running on port ${PORT}`);
       console.log(`Client URL: ${clientUrl}`);
       console.log(`Telegram configured: ${Boolean(process.env.TELEGRAM_BOT_TOKEN)}`);
-      console.log(`Ntfy topic: ${process.env.NTFY_TOPIC || "Privchat-admin-9x7k2m"}`);
     });
   } catch (err) {
     console.error("MongoDB connection failed. Server not started:", err);
