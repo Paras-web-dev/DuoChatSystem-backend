@@ -11,6 +11,9 @@ const messageRoutes = require("./routes/messages");
 const uploadRoutes = require("./routes/upload");
 const { authenticateSocket } = require("./middleware/auth");
 const { sendOnlineNotification } = require("./utils/mailer");
+// ✅ NEW: Telegram + Ntfy notifiers
+const { sendUserOnlineNotification, sendNewMessageNotification } = require("./utils/ntfyNotifier");
+const { sendUserOnlineTelegram, sendNewMessageTelegram } = require("./utils/telegramNotifier");
 const Message = require("./models/Message");
 const User = require("./models/User");
 
@@ -58,6 +61,10 @@ const onlineUsers = new Map();
 const messageCooldowns = new Map();
 const MESSAGE_COOLDOWN_MS = 500;
 
+// ✅ NEW: helper to check if admin is currently online
+const isAdminOnline = () =>
+  [...onlineUsers.values()].some((u) => u.role === "admin");
+
 io.use(authenticateSocket);
 
 io.on("connect_error", (err) => {
@@ -87,6 +94,11 @@ io.on("connection", async (socket) => {
 
   if (role !== "admin" && wasOffline) {
     sendOnlineNotification(username).catch(console.error);
+    // ✅ NEW: send Ntfy + Telegram if admin is offline
+    if (!isAdminOnline()) {
+      sendUserOnlineNotification(username).catch(console.error);
+      sendUserOnlineTelegram(username).catch(console.error);
+    }
   }
 
   socket.on("send_message", async (data) => {
@@ -129,6 +141,13 @@ io.on("connection", async (socket) => {
         isRead: populated.isRead,
         hiddenFromUser: populated.hiddenFromUser,
       });
+
+      // ✅ NEW: send Ntfy + Telegram if user sends message and admin is offline
+      if (role !== "admin" && !isAdminOnline()) {
+        sendNewMessageNotification(username, content, type).catch(console.error);
+        sendNewMessageTelegram(username, content, type).catch(console.error);
+      }
+
     } catch (err) {
       console.error("send_message error:", err);
       socket.emit("error", { message: "Failed to send message" });
@@ -188,6 +207,8 @@ const start = async () => {
     server.listen(PORT, () => {
       console.log(`PrivChat server running on port ${PORT}`);
       console.log(`Client URL: ${clientUrl}`);
+      console.log(`Telegram configured: ${Boolean(process.env.TELEGRAM_BOT_TOKEN)}`);
+      console.log(`Ntfy topic: ${process.env.NTFY_TOPIC || "Privchat-admin-9x7k2m"}`);
     });
   } catch (err) {
     console.error("MongoDB connection failed. Server not started:", err);
